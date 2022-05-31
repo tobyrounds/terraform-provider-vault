@@ -574,6 +574,11 @@ var (
 			PathInventory:  []string{"/sys/mfa/method/totp/{name}"},
 			EnterpriseOnly: true,
 		},
+		"vault_mfa_login_enforcement": {
+			Resource:       mfaLoginEnforcementResource(),
+			PathInventory:  []string{"/identity/mfa/login-enforcement/{name}"},
+			EnterpriseOnly: false,
+		},
 		"vault_mount": {
 			Resource:      MountResource(),
 			PathInventory: []string{"/sys/mounts/{path}"},
