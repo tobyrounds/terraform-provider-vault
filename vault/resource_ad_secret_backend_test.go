@@ -3,14 +3,12 @@ package vault
 import (
 	"fmt"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 
-	"github.com/hashicorp/terraform-provider-vault/internal/provider"
+	"github.com/hashicorp/terraform-provider-vault/internal/consts"
 	"github.com/hashicorp/terraform-provider-vault/testutil"
 )
 
@@ -18,12 +16,13 @@ func TestADSecretBackend(t *testing.T) {
 	backend := acctest.RandomWithPrefix("tf-test-ad")
 	bindDN, bindPass, url := testutil.GetTestADCreds(t)
 
-	resourceName := "vault_ad_secret_backend.test"
+	resourceType := "vault_ad_secret_backend"
+	resourceName := resourceType + ".test"
 	resource.Test(t, resource.TestCase{
 		Providers:                 testProviders,
 		PreCheck:                  func() { testutil.TestAccPreCheck(t) },
 		PreventPostDestroyRefresh: true,
-		CheckDestroy:              testAccADSecretBackendCheckDestroy,
+		CheckDestroy:              testCheckMountDestroyed(resourceType, consts.MountTypeAD, consts.FieldBackend),
 		Steps: []resource.TestStep{
 			{
 				Config: testADSecretBackend_initialConfig(backend, bindDN, bindPass, url),
@@ -39,7 +38,7 @@ func TestADSecretBackend(t *testing.T) {
 					resource.TestCheckResourceAttr(resourceName, "userdn", "CN=Users,DC=corp,DC=example,DC=net"),
 				),
 			},
-			testutil.GetImportTestStep(resourceName, false, "bindpass", "description"),
+			testutil.GetImportTestStep(resourceName, false, nil, "bindpass", "description", "disable_remount"),
 			// TODO: on vault-1.11+ length should conflict with password_policy
 			// We should re-enable this check when we have the adaptive version support.
 			//{
@@ -74,31 +73,48 @@ func TestADSecretBackend(t *testing.T) {
 	})
 }
 
-func testAccADSecretBackendCheckDestroy(s *terraform.State) error {
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "vault_ad_secret_backend" {
-			continue
-		}
+func TestADSecretBackend_remount(t *testing.T) {
+	backend := acctest.RandomWithPrefix("tf-test-ad")
+	updatedBackend := acctest.RandomWithPrefix("tf-test-ad-updated")
 
-		client, e := provider.GetClient(rs.Primary, testProvider.Meta())
-		if e != nil {
-			return e
-		}
+	resourceName := "vault_ad_secret_backend.test"
+	bindDN, bindPass, url := testutil.GetTestADCreds(t)
 
-		mounts, err := client.Sys().ListMounts()
-		if err != nil {
-			return err
-		}
-
-		for backend, mount := range mounts {
-			backend = strings.Trim(backend, "/")
-			rsBackend := strings.Trim(rs.Primary.Attributes["backend"], "/")
-			if mount.Type == "ad" && backend == rsBackend {
-				return fmt.Errorf("Mount %q still exists", rsBackend)
-			}
-		}
-	}
-	return nil
+	resource.Test(t, resource.TestCase{
+		Providers: testProviders,
+		PreCheck:  func() { testutil.TestAccPreCheck(t) },
+		Steps: []resource.TestStep{
+			{
+				Config: testADSecretBackend_initialConfig(backend, bindDN, bindPass, url),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "backend", backend),
+					resource.TestCheckResourceAttr(resourceName, "description", "test description"),
+					resource.TestCheckResourceAttr(resourceName, "default_lease_ttl_seconds", "3600"),
+					resource.TestCheckResourceAttr(resourceName, "max_lease_ttl_seconds", "7200"),
+					resource.TestCheckResourceAttr(resourceName, "binddn", bindDN),
+					resource.TestCheckResourceAttr(resourceName, "bindpass", bindPass),
+					resource.TestCheckResourceAttr(resourceName, "url", url),
+					resource.TestCheckResourceAttr(resourceName, "insecure_tls", "true"),
+					resource.TestCheckResourceAttr(resourceName, "userdn", "CN=Users,DC=corp,DC=example,DC=net"),
+				),
+			},
+			{
+				Config: testADSecretBackend_initialConfig(updatedBackend, bindDN, bindPass, url),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "backend", updatedBackend),
+					resource.TestCheckResourceAttr(resourceName, "description", "test description"),
+					resource.TestCheckResourceAttr(resourceName, "default_lease_ttl_seconds", "3600"),
+					resource.TestCheckResourceAttr(resourceName, "max_lease_ttl_seconds", "7200"),
+					resource.TestCheckResourceAttr(resourceName, "binddn", bindDN),
+					resource.TestCheckResourceAttr(resourceName, "bindpass", bindPass),
+					resource.TestCheckResourceAttr(resourceName, "url", url),
+					resource.TestCheckResourceAttr(resourceName, "insecure_tls", "true"),
+					resource.TestCheckResourceAttr(resourceName, "userdn", "CN=Users,DC=corp,DC=example,DC=net"),
+				),
+			},
+			testutil.GetImportTestStep(resourceName, false, nil, "bindpass", "description", "disable_remount"),
+		},
+	})
 }
 
 func testADSecretBackend_initialConfig(backend, bindDN, bindPass, url string) string {

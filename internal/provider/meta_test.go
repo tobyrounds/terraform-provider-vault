@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/hashicorp/vault/api"
@@ -354,6 +355,91 @@ func TestGetClient(t *testing.T) {
 			actual := got.Headers().Get(vault_consts.NamespaceHeaderName)
 			if !reflect.DeepEqual(actual, tt.want) {
 				t.Errorf("GetClient() got = %v, want %v", actual, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAPISupported(t *testing.T) {
+	rootClient, err := api.NewClient(api.DefaultConfig())
+	if err != nil {
+		t.Fatalf("error initializing root client, err=%s", err)
+	}
+
+	VaultVersion10, err := version.NewVersion("1.10.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	VaultVersion11, err := version.NewVersion("1.11.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testCases := []struct {
+		name       string
+		minVersion *version.Version
+		expected   bool
+		meta       interface{}
+	}{
+		{
+			name:       "supported-greater-than",
+			minVersion: version.Must(version.NewSemver("1.8.0")),
+			expected:   true,
+			meta: &ProviderMeta{
+				client:       rootClient,
+				vaultVersion: VaultVersion11,
+			},
+		},
+		{
+			name:       "supported-less-than",
+			minVersion: version.Must(version.NewSemver("1.12.0")),
+			expected:   false,
+			meta: &ProviderMeta{
+				client:       rootClient,
+				vaultVersion: VaultVersion11,
+			},
+		},
+		{
+			name:       "supported-equal",
+			minVersion: version.Must(version.NewSemver("1.10.0")),
+			expected:   true,
+			meta: &ProviderMeta{
+				client:       rootClient,
+				vaultVersion: VaultVersion10,
+			},
+		},
+		{
+			name:       "unsupported-unset",
+			minVersion: version.Must(version.NewSemver("1.12.0")),
+			expected:   false,
+			meta: &ProviderMeta{
+				client:       rootClient,
+				vaultVersion: nil,
+			},
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.meta != nil {
+				m := tt.meta.(*ProviderMeta)
+				m.resourceData = schema.TestResourceDataRaw(t,
+					map[string]*schema.Schema{
+						consts.FieldNamespace: {
+							Type:     schema.TypeString,
+							Required: true,
+						},
+					},
+					map[string]interface{}{},
+				)
+				tt.meta = m
+			}
+
+			isTFVersionGreater := tt.meta.(*ProviderMeta).IsAPISupported(tt.minVersion)
+
+			if isTFVersionGreater != tt.expected {
+				t.Errorf("IsAPISupported() got = %v, want %v", isTFVersionGreater, tt.expected)
 			}
 		})
 	}
